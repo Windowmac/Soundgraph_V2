@@ -5,7 +5,8 @@ const ATTACK_TIME = 0.01
 const RELEASE_TIME = 0.06
 const MASTER_GAIN = 0.18
 
-// Max pitch bend in semitones (±2 semitones over ±120px lateral movement)
+// Max pitch bend in semitones (±2 semitones over ±120px vertical movement)
+// Caller passes a positive delta to bend up, negative to bend down
 const MAX_BEND_SEMITONES = 2
 const BEND_PX_RANGE = 120
 

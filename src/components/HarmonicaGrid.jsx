@@ -1,61 +1,108 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { useAudioEngine } from '../hooks/useAudioEngine'
 
-// C Diatonic Harmonica — 10 holes
-// Row 0 = Blow (exhale), Row 1 = Draw (inhale)
-const NOTES = [
-  // Blow row (top)
-  [
-    { label: 'C4',  freq: 261.63, hole: 1 },
-    { label: 'E4',  freq: 329.63, hole: 2 },
-    { label: 'G4',  freq: 392.00, hole: 3 },
-    { label: 'C5',  freq: 523.25, hole: 4 },
-    { label: 'E5',  freq: 659.25, hole: 5 },
-    { label: 'G5',  freq: 783.99, hole: 6 },
-    { label: 'C6',  freq: 1046.50, hole: 7 },
-    { label: 'E6',  freq: 1318.51, hole: 8 },
-    { label: 'G6',  freq: 1567.98, hole: 9 },
-    { label: 'C7',  freq: 2093.00, hole: 10 },
-  ],
-  // Draw row (bottom)
-  [
-    { label: 'D4',  freq: 293.66, hole: 1 },
-    { label: 'G4',  freq: 392.00, hole: 2 },
-    { label: 'B4',  freq: 493.88, hole: 3 },
-    { label: 'D5',  freq: 587.33, hole: 4 },
-    { label: 'F5',  freq: 698.46, hole: 5 },
-    { label: 'A5',  freq: 880.00, hole: 6 },
-    { label: 'B5',  freq: 987.77, hole: 7 },
-    { label: 'D6',  freq: 1174.66, hole: 8 },
-    { label: 'F6',  freq: 1396.91, hole: 9 },
-    { label: 'A6',  freq: 1760.00, hole: 10 },
-  ],
+// ─── Tuning definitions ───────────────────────────────────────────────────────
+// Paddy Richter raises hole 3 blow one whole step (G4 → A4) for Celtic playing
+const TUNINGS = [
+  {
+    id: 'richter',
+    name: 'RICHTER TUNING',
+    rows: [
+      // Blow (top row)
+      [
+        { label: 'C4',  freq: 261.63 },
+        { label: 'E4',  freq: 329.63 },
+        { label: 'G4',  freq: 392.00 },
+        { label: 'C5',  freq: 523.25 },
+        { label: 'E5',  freq: 659.25 },
+        { label: 'G5',  freq: 783.99 },
+        { label: 'C6',  freq: 1046.50 },
+        { label: 'E6',  freq: 1318.51 },
+        { label: 'G6',  freq: 1567.98 },
+        { label: 'C7',  freq: 2093.00 },
+      ],
+      // Draw (bottom row)
+      [
+        { label: 'D4',  freq: 293.66 },
+        { label: 'G4',  freq: 392.00 },
+        { label: 'B4',  freq: 493.88 },
+        { label: 'D5',  freq: 587.33 },
+        { label: 'F5',  freq: 698.46 },
+        { label: 'A5',  freq: 880.00 },
+        { label: 'B5',  freq: 987.77 },
+        { label: 'D6',  freq: 1174.66 },
+        { label: 'F6',  freq: 1396.91 },
+        { label: 'A6',  freq: 1760.00 },
+      ],
+    ],
+  },
+  {
+    id: 'paddy-richter',
+    name: 'PADDY RICHTER',
+    rows: [
+      // Blow: hole 3 raised G4 → A4
+      [
+        { label: 'C4',  freq: 261.63 },
+        { label: 'E4',  freq: 329.63 },
+        { label: 'A4',  freq: 440.00 },
+        { label: 'C5',  freq: 523.25 },
+        { label: 'E5',  freq: 659.25 },
+        { label: 'G5',  freq: 783.99 },
+        { label: 'C6',  freq: 1046.50 },
+        { label: 'E6',  freq: 1318.51 },
+        { label: 'G6',  freq: 1567.98 },
+        { label: 'C7',  freq: 2093.00 },
+      ],
+      // Draw: identical to Richter
+      [
+        { label: 'D4',  freq: 293.66 },
+        { label: 'G4',  freq: 392.00 },
+        { label: 'B4',  freq: 493.88 },
+        { label: 'D5',  freq: 587.33 },
+        { label: 'F5',  freq: 698.46 },
+        { label: 'A5',  freq: 880.00 },
+        { label: 'B5',  freq: 987.77 },
+        { label: 'D6',  freq: 1174.66 },
+        { label: 'F6',  freq: 1396.91 },
+        { label: 'A6',  freq: 1760.00 },
+      ],
+    ],
+  },
 ]
 
 const ROW_LABELS = ['BLOW', 'DRAW']
 
+const keyId     = (row, col) => `${row}-${col}`
+const voiceId   = (id)       => `touch-${id}`
+
+// ─── Component ────────────────────────────────────────────────────────────────
 export function HarmonicaGrid() {
   const { startNote, bendNote, stopNote } = useAudioEngine()
 
-  // activeKeys: Set of "row-col" strings
-  const [activeKeys, setActiveKeys] = useState(new Set())
+  const [activeTuningId, setActiveTuningId] = useState('richter')
+  const [activeKeys, setActiveKeys]         = useState(new Set())
 
-  // Map touchId -> { row, col, startX }
+  const tuning   = TUNINGS.find(t => t.id === activeTuningId)
+  const notes    = tuning.rows
+
+  // Keep a ref so event callbacks always read the latest tuning without
+  // needing to be recreated every time tuning changes
+  const notesRef = useRef(notes)
+  notesRef.current = notes
+
+  // Touch tracking: identifier → { row, col, startY }
+  // startY resets each time a finger glides onto a new square, so bend
+  // always measures from the moment the current note was entered
   const touchMapRef = useRef(new Map())
 
-  const keyId = (row, col) => `${row}-${col}`
-  const touchNoteId = (touchId) => `touch-${touchId}`
-
-  const activateKey = useCallback((row, col, touchId) => {
-    const noteId = touchNoteId(touchId)
-    const note = NOTES[row][col]
-    startNote(noteId, note.freq)
+  // ── Core note helpers ────────────────────────────────────────────────────
+  const activateKey = useCallback((row, col, vid) => {
+    startNote(vid, notesRef.current[row][col].freq)
     setActiveKeys(prev => new Set([...prev, keyId(row, col)]))
   }, [startNote])
 
-  const deactivateKey = useCallback((row, col, touchId) => {
-    const noteId = touchNoteId(touchId)
-    stopNote(noteId)
+  const deactivateKey = useCallback((row, col, vid) => {
+    stopNote(vid)
     setActiveKeys(prev => {
       const next = new Set(prev)
       next.delete(keyId(row, col))
@@ -63,80 +110,121 @@ export function HarmonicaGrid() {
     })
   }, [stopNote])
 
+  // ── Touch handlers ───────────────────────────────────────────────────────
   const handleTouchStart = useCallback((e) => {
     e.preventDefault()
-    Array.from(e.changedTouches).forEach(touch => {
-      const el = document.elementFromPoint(touch.clientX, touch.clientY)
-      if (!el) return
-      const row = parseInt(el.dataset.row)
-      const col = parseInt(el.dataset.col)
-      if (isNaN(row) || isNaN(col)) return
+    for (const touch of e.changedTouches) {
+      const el  = document.elementFromPoint(touch.clientX, touch.clientY)
+      const row = el ? parseInt(el.dataset.row) : NaN
+      const col = el ? parseInt(el.dataset.col) : NaN
+      if (isNaN(row) || isNaN(col)) continue
 
-      touchMapRef.current.set(touch.identifier, { row, col, startX: touch.clientX })
-      activateKey(row, col, touch.identifier)
-    })
+      touchMapRef.current.set(touch.identifier, { row, col, startY: touch.clientY })
+      activateKey(row, col, voiceId(touch.identifier))
+    }
   }, [activateKey])
 
   const handleTouchMove = useCallback((e) => {
     e.preventDefault()
-    Array.from(e.changedTouches).forEach(touch => {
+    for (const touch of e.changedTouches) {
       const entry = touchMapRef.current.get(touch.identifier)
-      if (!entry) return
+      if (!entry) continue
 
-      const deltaX = touch.clientX - entry.startX
-      bendNote(touchNoteId(touch.identifier), deltaX)
-    })
-  }, [bendNote])
+      const el     = document.elementFromPoint(touch.clientX, touch.clientY)
+      const newRow = el ? parseInt(el.dataset.row) : NaN
+      const newCol = el ? parseInt(el.dataset.col) : NaN
+
+      const movedToNewSquare =
+        !isNaN(newRow) && !isNaN(newCol) &&
+        (newRow !== entry.row || newCol !== entry.col)
+
+      if (movedToNewSquare) {
+        // Horizontal glide: transition to the new note
+        deactivateKey(entry.row, entry.col, voiceId(touch.identifier))
+        touchMapRef.current.set(touch.identifier, {
+          row: newRow, col: newCol, startY: touch.clientY,
+        })
+        activateKey(newRow, newCol, voiceId(touch.identifier))
+      } else {
+        // Vertical movement: bend the current note
+        // Upward finger movement (negative screen delta) = pitch up
+        const deltaY = entry.startY - touch.clientY
+        bendNote(voiceId(touch.identifier), deltaY)
+      }
+    }
+  }, [activateKey, deactivateKey, bendNote])
 
   const handleTouchEnd = useCallback((e) => {
     e.preventDefault()
-    Array.from(e.changedTouches).forEach(touch => {
+    for (const touch of e.changedTouches) {
       const entry = touchMapRef.current.get(touch.identifier)
-      if (!entry) return
-      deactivateKey(entry.row, entry.col, touch.identifier)
+      if (!entry) continue
+      deactivateKey(entry.row, entry.col, voiceId(touch.identifier))
       touchMapRef.current.delete(touch.identifier)
-    })
+    }
   }, [deactivateKey])
 
-  // Mouse support for desktop testing
-  const mouseVoiceRef = useRef(null)
-  const mouseStartXRef = useRef(0)
+  // ── Mouse handlers (desktop testing) ────────────────────────────────────
+  const mouseRef = useRef(null) // { row, col, startY }
 
   const handleMouseDown = useCallback((e, row, col) => {
-    const voiceId = 'mouse-0'
-    mouseVoiceRef.current = { row, col }
-    mouseStartXRef.current = e.clientX
-    startNote(voiceId, NOTES[row][col].freq)
-    setActiveKeys(prev => new Set([...prev, keyId(row, col)]))
-  }, [startNote])
+    e.preventDefault()
+    if (mouseRef.current) {
+      deactivateKey(mouseRef.current.row, mouseRef.current.col, 'mouse-0')
+    }
+    mouseRef.current = { row, col, startY: e.clientY }
+    activateKey(row, col, 'mouse-0')
+  }, [activateKey, deactivateKey])
 
   const handleMouseMove = useCallback((e) => {
-    if (!mouseVoiceRef.current) return
-    const deltaX = e.clientX - mouseStartXRef.current
-    bendNote('mouse-0', deltaX)
-  }, [bendNote])
+    if (!mouseRef.current) return
+    const el     = document.elementFromPoint(e.clientX, e.clientY)
+    const newRow = el ? parseInt(el.dataset.row) : NaN
+    const newCol = el ? parseInt(el.dataset.col) : NaN
+
+    const movedToNewSquare =
+      !isNaN(newRow) && !isNaN(newCol) &&
+      (newRow !== mouseRef.current.row || newCol !== mouseRef.current.col)
+
+    if (movedToNewSquare) {
+      deactivateKey(mouseRef.current.row, mouseRef.current.col, 'mouse-0')
+      mouseRef.current = { row: newRow, col: newCol, startY: e.clientY }
+      activateKey(newRow, newCol, 'mouse-0')
+    } else {
+      const deltaY = mouseRef.current.startY - e.clientY
+      bendNote('mouse-0', deltaY)
+    }
+  }, [activateKey, deactivateKey, bendNote])
 
   const handleMouseUp = useCallback(() => {
-    if (!mouseVoiceRef.current) return
-    const { row, col } = mouseVoiceRef.current
-    stopNote('mouse-0')
-    setActiveKeys(prev => {
-      const next = new Set(prev)
-      next.delete(keyId(row, col))
-      return next
-    })
-    mouseVoiceRef.current = null
-  }, [stopNote])
+    if (!mouseRef.current) return
+    deactivateKey(mouseRef.current.row, mouseRef.current.col, 'mouse-0')
+    mouseRef.current = null
+  }, [deactivateKey])
 
   useEffect(() => {
     window.addEventListener('mousemove', handleMouseMove)
-    window.addEventListener('mouseup', handleMouseUp)
+    window.addEventListener('mouseup',   handleMouseUp)
     return () => {
       window.removeEventListener('mousemove', handleMouseMove)
-      window.removeEventListener('mouseup', handleMouseUp)
+      window.removeEventListener('mouseup',   handleMouseUp)
     }
   }, [handleMouseMove, handleMouseUp])
 
+  // ── Tuning switcher ──────────────────────────────────────────────────────
+  const handleTuningChange = useCallback((id) => {
+    // Kill all active voices before switching so nothing keeps ringing
+    touchMapRef.current.forEach((_, touchId) => stopNote(voiceId(touchId)))
+    touchMapRef.current.clear()
+    if (mouseRef.current) {
+      stopNote('mouse-0')
+      mouseRef.current = null
+    }
+    setActiveKeys(new Set())
+    setActiveTuningId(id)
+  }, [stopNote])
+
+  // ── Render ───────────────────────────────────────────────────────────────
   return (
     <div
       style={styles.wrapper}
@@ -146,20 +234,18 @@ export function HarmonicaGrid() {
       onTouchCancel={handleTouchEnd}
     >
       <div style={styles.title}>SOUNDGRAPH</div>
-      <div style={styles.subtitle}>C DIATONIC HARMONICA</div>
+      <div style={styles.subtitle}>{tuning.name}</div>
 
+      {/* ── Main grid ── */}
       <div style={styles.gridContainer}>
-        {/* Hole number header */}
         <div style={styles.headerRow}>
           <div style={styles.rowLabelSpacer} />
-          {NOTES[0].map((note) => (
-            <div key={note.hole} style={styles.holeLabel}>
-              {note.hole}
-            </div>
+          {notes[0].map((_, i) => (
+            <div key={i} style={styles.holeLabel}>{i + 1}</div>
           ))}
         </div>
 
-        {NOTES.map((row, rowIdx) => (
+        {notes.map((row, rowIdx) => (
           <div key={rowIdx} style={styles.row}>
             <div style={styles.rowLabel}>{ROW_LABELS[rowIdx]}</div>
             {row.map((note, colIdx) => {
@@ -169,10 +255,7 @@ export function HarmonicaGrid() {
                   key={colIdx}
                   data-row={rowIdx}
                   data-col={colIdx}
-                  style={{
-                    ...styles.key,
-                    ...(active ? styles.keyActive : styles.keyInactive),
-                  }}
+                  style={{ ...styles.key, ...(active ? styles.keyActive : styles.keyInactive) }}
                   onMouseDown={(e) => handleMouseDown(e, rowIdx, colIdx)}
                 >
                   <span style={{ ...styles.noteLabel, pointerEvents: 'none' }}>
@@ -185,13 +268,31 @@ export function HarmonicaGrid() {
         ))}
       </div>
 
+      {/* ── Tuning selector ── */}
+      <div style={styles.tuningRow}>
+        {TUNINGS.map(t => (
+          <button
+            key={t.id}
+            style={{
+              ...styles.tuningBtn,
+              ...(activeTuningId === t.id ? styles.tuningBtnActive : {}),
+            }}
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={() => handleTuningChange(t.id)}
+          >
+            {t.name}
+          </button>
+        ))}
+      </div>
+
       <div style={styles.hint}>
-        HOLD + SLIDE LATERALLY TO BEND
+        SLIDE ACROSS TO GLIDE  ·  SLIDE UP / DOWN TO BEND
       </div>
     </div>
   )
 }
 
+// ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = {
   wrapper: {
     display: 'flex',
@@ -215,9 +316,9 @@ const styles = {
   },
   subtitle: {
     color: '#005c13',
-    fontSize: 'clamp(8px, 1.6vw, 12px)',
+    fontSize: 'clamp(8px, 1.6vw, 11px)',
     letterSpacing: '0.3em',
-    marginBottom: '32px',
+    marginBottom: '28px',
   },
   gridContainer: {
     display: 'flex',
@@ -231,9 +332,7 @@ const styles = {
     gap: '6px',
     marginBottom: '2px',
   },
-  rowLabelSpacer: {
-    width: '42px',
-  },
+  rowLabelSpacer: { width: '42px' },
   holeLabel: {
     width: 'clamp(42px, 7vw, 62px)',
     textAlign: 'center',
@@ -284,8 +383,32 @@ const styles = {
     textShadow: '0 0 4px #00ff41',
     fontFamily: '"Courier New", Courier, monospace',
   },
+  tuningRow: {
+    display: 'flex',
+    flexDirection: 'row',
+    gap: '10px',
+    marginTop: '24px',
+  },
+  tuningBtn: {
+    background: 'transparent',
+    border: '1px solid #003a0d',
+    color: '#005c13',
+    fontFamily: '"Courier New", Courier, monospace',
+    fontSize: 'clamp(7px, 1.2vw, 10px)',
+    letterSpacing: '0.2em',
+    padding: '5px 10px',
+    cursor: 'pointer',
+    transition: 'color 0.1s, border-color 0.1s',
+    touchAction: 'manipulation',
+  },
+  tuningBtnActive: {
+    color: '#00ff41',
+    borderColor: '#00ff41',
+    textShadow: '0 0 6px #00ff41',
+    boxShadow: '0 0 8px #003a0d',
+  },
   hint: {
-    marginTop: '28px',
+    marginTop: '14px',
     color: '#003a0d',
     fontSize: 'clamp(7px, 1.2vw, 10px)',
     letterSpacing: '0.25em',
