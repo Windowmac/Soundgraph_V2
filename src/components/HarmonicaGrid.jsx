@@ -278,6 +278,8 @@ export function HarmonicaGrid() {
               ...(activeTuningId === t.id ? styles.tuningBtnActive : {}),
             }}
             onMouseDown={(e) => e.stopPropagation()}
+            onTouchStart={(e) => e.stopPropagation()}
+            onTouchEnd={(e) => { e.stopPropagation(); e.preventDefault(); handleTuningChange(t.id) }}
             onClick={() => handleTuningChange(t.id)}
           >
             {t.name}
