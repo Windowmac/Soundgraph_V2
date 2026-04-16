@@ -72,6 +72,9 @@ const TUNINGS = [
 
 const ROW_LABELS = ['BLOW', 'DRAW']
 
+// Must match BEND_PX_RANGE in useAudioEngine so visual scale tracks pitch 1-to-1
+const VISUAL_BEND_PX_RANGE = 120
+
 const keyId     = (row, col) => `${row}-${col}`
 const voiceId   = (id)       => `touch-${id}`
 
@@ -81,6 +84,8 @@ export function HarmonicaGrid() {
 
   const [activeTuningId, setActiveTuningId] = useState('richter')
   const [activeKeys, setActiveKeys]         = useState(new Set())
+  // bendStates: Map<keyId, { bendAmount: 0–1, bendDirection: 'up' | 'down' }>
+  const [bendStates, setBendStates]         = useState(new Map())
 
   const tuning   = TUNINGS.find(t => t.id === activeTuningId)
   const notes    = tuning.rows
@@ -95,6 +100,19 @@ export function HarmonicaGrid() {
   // always measures from the moment the current note was entered
   const touchMapRef = useRef(new Map())
 
+  // ── Bend visual helper ───────────────────────────────────────────────────
+  const updateBendVisual = useCallback((row, col, deltaY) => {
+    // deltaY = startY − currentY: positive means finger moved UP
+    // bendDirection tracks screen direction: 'down' = finger moved toward bottom
+    const bendAmount    = Math.min(1, Math.abs(deltaY) / VISUAL_BEND_PX_RANGE)
+    const bendDirection = deltaY < 0 ? 'down' : 'up'
+    setBendStates(prev => {
+      const next = new Map(prev)
+      next.set(keyId(row, col), { bendAmount, bendDirection })
+      return next
+    })
+  }, [])
+
   // ── Core note helpers ────────────────────────────────────────────────────
   const activateKey = useCallback((row, col, vid) => {
     startNote(vid, notesRef.current[row][col].freq)
@@ -103,9 +121,16 @@ export function HarmonicaGrid() {
 
   const deactivateKey = useCallback((row, col, vid) => {
     stopNote(vid)
+    const id = keyId(row, col)
     setActiveKeys(prev => {
       const next = new Set(prev)
-      next.delete(keyId(row, col))
+      next.delete(id)
+      return next
+    })
+    setBendStates(prev => {
+      if (!prev.has(id)) return prev
+      const next = new Map(prev)
+      next.delete(id)
       return next
     })
   }, [stopNote])
@@ -150,9 +175,10 @@ export function HarmonicaGrid() {
         // Upward finger movement (negative screen delta) = pitch up
         const deltaY = entry.startY - touch.clientY
         bendNote(voiceId(touch.identifier), deltaY)
+        updateBendVisual(entry.row, entry.col, deltaY)
       }
     }
-  }, [activateKey, deactivateKey, bendNote])
+  }, [activateKey, deactivateKey, bendNote, updateBendVisual])
 
   const handleTouchEnd = useCallback((e) => {
     e.preventDefault()
@@ -193,8 +219,9 @@ export function HarmonicaGrid() {
     } else {
       const deltaY = mouseRef.current.startY - e.clientY
       bendNote('mouse-0', deltaY)
+      updateBendVisual(mouseRef.current.row, mouseRef.current.col, deltaY)
     }
-  }, [activateKey, deactivateKey, bendNote])
+  }, [activateKey, deactivateKey, bendNote, updateBendVisual])
 
   const handleMouseUp = useCallback(() => {
     if (!mouseRef.current) return
@@ -221,6 +248,7 @@ export function HarmonicaGrid() {
       mouseRef.current = null
     }
     setActiveKeys(new Set())
+    setBendStates(new Map())
     setActiveTuningId(id)
   }, [stopNote])
 
@@ -250,12 +278,64 @@ export function HarmonicaGrid() {
             <div style={styles.rowLabel}>{ROW_LABELS[rowIdx]}</div>
             {row.map((note, colIdx) => {
               const active = activeKeys.has(keyId(rowIdx, colIdx))
+
+              // ── Bend-stretch transform ──────────────────────────────────
+              // Check this key's own bend and both adjacent neighbors
+              const selfBend  = bendStates.get(keyId(rowIdx, colIdx))
+              const aboveBend = rowIdx > 0
+                ? bendStates.get(keyId(rowIdx - 1, colIdx))
+                : undefined
+              const belowBend = rowIdx < notes.length - 1
+                ? bendStates.get(keyId(rowIdx + 1, colIdx))
+                : undefined
+
+              let bendTransform = {}
+
+              if (selfBend && selfBend.bendAmount > 0.01) {
+                // Held key: grow toward the bend direction (100% → 150%)
+                const scale  = 1 + 0.5 * selfBend.bendAmount
+                const origin = selfBend.bendDirection === 'down'
+                  ? 'top center'
+                  : 'bottom center'
+                bendTransform = {
+                  transform:       `scaleY(${scale.toFixed(4)})`,
+                  transformOrigin: origin,
+                  zIndex:          2,
+                }
+              } else if (
+                aboveBend &&
+                aboveBend.bendDirection === 'down' &&
+                aboveBend.bendAmount > 0.01
+              ) {
+                // Key above is stretching down toward us – retreat from top (100% → 75%)
+                const scale = 1 - 0.5 * aboveBend.bendAmount
+                bendTransform = {
+                  transform:       `scaleY(${scale.toFixed(4)})`,
+                  transformOrigin: 'bottom center',
+                }
+              } else if (
+                belowBend &&
+                belowBend.bendDirection === 'up' &&
+                belowBend.bendAmount > 0.01
+              ) {
+                // Key below is stretching up toward us – retreat from bottom (100% → 75%)
+                const scale = 1 - 0.5 * belowBend.bendAmount
+                bendTransform = {
+                  transform:       `scaleY(${scale.toFixed(4)})`,
+                  transformOrigin: 'top center',
+                }
+              }
+
               return (
                 <div
                   key={colIdx}
                   data-row={rowIdx}
                   data-col={colIdx}
-                  style={{ ...styles.key, ...(active ? styles.keyActive : styles.keyInactive) }}
+                  style={{
+                    ...styles.key,
+                    ...(active ? styles.keyActive : styles.keyInactive),
+                    ...bendTransform,
+                  }}
                   onMouseDown={(e) => handleMouseDown(e, rowIdx, colIdx)}
                 >
                   <span style={{ ...styles.noteLabel, pointerEvents: 'none' }}>
@@ -366,7 +446,7 @@ const styles = {
     justifyContent: 'center',
     border: '1px solid #003a0d',
     cursor: 'pointer',
-    transition: 'background 0.04s, box-shadow 0.04s',
+    transition: 'background 0.04s, box-shadow 0.04s, transform 0.05s ease-out',
     position: 'relative',
   },
   keyInactive: {
@@ -411,7 +491,7 @@ const styles = {
   },
   hint: {
     marginTop: '14px',
-    color: '#003a0d',
+    color: '#015514',
     fontSize: 'clamp(7px, 1.2vw, 10px)',
     letterSpacing: '0.25em',
     fontFamily: '"Courier New", Courier, monospace',
