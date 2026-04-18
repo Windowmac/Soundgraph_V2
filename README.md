@@ -1,77 +1,92 @@
 # SOUNDGRAPH
 
-A browser-based digital harmonica built with React and the Web Audio API. Designed for touch screens but fully playable with a mouse. No native compilation, no app store — open it in a browser and play.
+A native mobile harmonica instrument built with React Native and Expo. Designed for landscape touch screens — polyphonic, bendable, and glide-able. No browser required.
 
 ---
 
 ## What it does
 
-Soundgraph presents a 2×10 grid of playable squares modelled on a 10-hole diatonic harmonica. The top row is blow notes, the bottom row is draw notes. Touch or click any square to hear it. Touch multiple squares at once for polyphonic chords. Slide your finger horizontally across the grid to glide between notes; slide vertically to bend pitch up or down, the same way you'd bend a string on a guitar.
+Soundgraph presents a 2×10 grid of playable keys modelled on a 10-hole diatonic harmonica. The top row is blow notes, the bottom row is draw notes. Touch any key to hear it. Touch multiple keys at once for polyphonic chords. Slide your finger horizontally to glide between notes; slide vertically to bend pitch up or down, the same way you'd bend a string on a guitar.
 
 The aesthetic is intentionally sparse — black background, lime green neon glow on active keys, monospace type throughout — somewhere between a hardware sequencer and a terminal from 1994.
 
 ### Tunings
 
-Two tunings are available, switchable at runtime with no interruption to playing:
+Four tunings are available, switchable mid-play via a swipe-down panel. Any ringing notes stop cleanly when you switch.
 
 | Tuning | Description |
 |---|---|
-| **Richter Tuning** | Standard C diatonic layout. The default tuning for blues, folk, and rock harmonica worldwide. Hole 3 blow is G4. |
-| **Paddy Richter** | Identical to Richter except hole 3 blow is raised a whole step (G4 → A4). That single change makes the natural minor run on the lower octave accessible without bending, which is why it's the preferred tuning for Irish and Scottish traditional music. |
+| **Richter (C)** | Standard C diatonic layout. The default tuning for blues, folk, and rock harmonica worldwide. |
+| **Paddy Richter** | Richter except hole 3 blow is raised G4 → A4. That single change makes the natural minor run accessible without bending — the preferred tuning for Irish and Scottish traditional music. |
+| **Country (C)** | Richter with hole 5 draw raised F5 → F#5 (and hole 9 draw F6 → F#6). Opens up the raised 4th runs that define country and bluegrass phrasing. |
+| **Natural Minor (Dm)** | Retuned to D natural minor throughout. Blow row plays the Dm arpeggio; draw row fills the scale. |
 
 ---
 
 ## What is technically interesting
 
-### No audio libraries
+### Web Audio API running natively
 
-Sound is generated entirely with the browser-native [Web Audio API](https://developer.mozilla.org/en-US/docs/Web/API/Web_Audio_API). Each active touch creates its own `OscillatorNode` (square wave) routed through a `GainNode` for envelope control, all feeding into a shared master gain node. There are no audio files, no samples, no third-party audio packages.
+Sound is generated with [`react-native-audio-api`](https://github.com/software-mansion/react-native-audio-api), which implements the Web Audio API spec as a native module — same `AudioContext`, `OscillatorNode`, and `GainNode` primitives as in a browser, but compiled to native audio threads on Android and iOS. Each active touch creates its own `OscillatorNode` (square wave) routed through a `GainNode` for envelope control, all feeding into a shared master gain. There are no audio files and no samples.
 
 ### True polyphony via touch identifier tracking
 
-The browser assigns each simultaneous touch a stable numeric `identifier`. The audio engine maintains a `Map` keyed by that identifier, so each finger owns an independent oscillator. Lifting one finger releases only its voice; the others keep playing. This is what makes chords and glides work correctly — there is no "one note at a time" limitation.
+React Native assigns each simultaneous touch a stable numeric `identifier` via `nativeEvent`. The audio engine maintains a `Map<number, Voice>` keyed by that identifier, so each finger owns an independent oscillator. Lifting one finger releases only its voice; the others keep playing. This is what makes chords and glides work correctly.
 
 ### Pitch bend via `setTargetAtTime`
 
-Vertical finger movement is mapped to a ±2 semitone frequency deviation using `oscillator.frequency.setTargetAtTime()`. This ramps smoothly rather than jumping, which produces the continuous wobble of a string bend rather than a stepped pitch shift. The reference Y position resets each time a finger enters a new square, so bending always starts from the centre pitch of the current note.
+Vertical finger movement is mapped to ±2 semitones using `oscillator.frequency.setTargetAtTime()` with a 15 ms time constant. This ramps smoothly rather than jumping, which produces the continuous wobble of a real bend rather than a stepped pitch shift. The reference Y position resets each time a finger enters a new key, so bending always starts from the center pitch of the current note.
 
-### Glide via `elementFromPoint`
+### Glide via layout-relative coordinate math
 
-Horizontal gliding works by calling `document.elementFromPoint(x, y)` on every `touchmove` event and reading the `data-row` / `data-col` attributes of whichever element is under the finger. When those values differ from the currently tracked square, the old voice is released with its fade-out envelope and a new one is attacked — seamlessly, mid-gesture.
+Horizontal gliding works by recording the pixel dimensions of the key area `View` via `onLayout`, then mapping each `touchmove` coordinate to a grid cell using integer division. When a finger crosses into a different cell, the old voice is released with its fade-out envelope and a new one is attacked — seamlessly, mid-gesture. No DOM, no `elementFromPoint` — just geometry.
 
-### Touch event propagation isolation
+### Swipe-down tuning menu
 
-The grid wrapper intercepts all touch events and calls `e.preventDefault()` to suppress browser scroll and zoom behaviour. UI controls (tuning selector) sit inside the same wrapper, so they need to stop their own touch events from bubbling before the grid handler can swallow them — otherwise taps on buttons never synthesise a click. Each button handles `onTouchEnd` directly and calls `e.stopPropagation()` to break out of the grid's event boundary.
+The tuning panel lives above the screen and slides into view when the user swipes down from a thin handle strip at the top. A `PanResponder` tracks the gesture and drives an `Animated.Value` directly, so the panel follows the finger in real time before snapping open or closed via a spring animation. The grid receives a `disabled` prop during this gesture to prevent accidental note triggers.
+
+### Orientation lock
+
+The app locks itself to landscape on mount via `expo-screen-orientation`. The key grid is designed exclusively for landscape — locking orientation prevents the layout from collapsing on rotation and keeps the instrument playable at any screen size.
 
 ---
 
 ## Getting started
 
-Requires [Node.js](https://nodejs.org/) v16 or later and npm.
+### Prerequisites
+
+- [Node.js](https://nodejs.org/) v18 or later
+- [Android Studio](https://developer.android.com/studio) with the Android SDK installed (for Android builds)
+- [JDK 17](https://adoptium.net/) — required by React Native 0.76
+- A physical Android device or emulator (USB debugging enabled)
+
+### Install
 
 ```bash
 git clone https://github.com/your-username/Soundgraph_V2.git
 cd Soundgraph_V2
 npm install
-npm run dev
 ```
 
-Vite will print two URLs:
+### Run on Android
 
+Plug in your device (or start an emulator), then:
+
+```bash
+npx expo run:android
 ```
-Local:   http://localhost:5173/
-Network: http://192.168.x.x:5173/
+
+Expo will compile the native Android project, install the APK, and launch the Metro bundler. The app will open automatically on your device in landscape mode.
+
+> **First run only:** Expo generates the `android/` native project on first build. Subsequent builds are faster thanks to Gradle's build cache.
+
+### Run on iOS
+
+```bash
+npx expo run:ios
 ```
 
-Open the **Local** URL in a desktop browser to test with a mouse. Open the **Network** URL on any phone or tablet on the same Wi-Fi network to test with touch. No build step, no deployment, no app installation required.
-
-### Other commands
-
-| Command | What it does |
-|---|---|
-| `npm run dev` | Start the development server with hot reload |
-| `npm run build` | Compile a production build to `dist/` |
-| `npm run preview` | Serve the production build locally for final testing |
+Requires a Mac with Xcode installed.
 
 ---
 
@@ -79,30 +94,42 @@ Open the **Local** URL in a desktop browser to test with a mouse. Open the **Net
 
 | Gesture | Effect |
 |---|---|
-| Tap / click a square | Play that note |
-| Hold multiple squares | Polyphonic chord |
+| Tap a key | Play that note |
+| Hold multiple keys | Polyphonic chord |
 | Hold + slide left or right | Glide to adjacent notes |
-| Hold + slide up | Bend pitch up (max ±2 semitones) |
+| Hold + slide up | Bend pitch up (±2 semitones max) |
 | Hold + slide down | Bend pitch down |
-
-The tuning buttons at the bottom of the screen switch between Richter and Paddy Richter. Any notes currently ringing stop cleanly when you switch.
+| Swipe down from top strip | Open tuning menu |
+| Tap outside menu / swipe up | Close tuning menu |
 
 ---
 
-## Note layout (C Diatonic)
+## Note layout
 
+**Richter / Country (C Diatonic)**
 ```
 Hole:    1    2    3    4    5    6    7    8    9   10
 Blow:   C4   E4   G4   C5   E5   G5   C6   E6   G6   C7
 Draw:   D4   G4   B4   D5   F5   A5   B5   D6   F6   A6
 ```
 
-Paddy Richter replaces hole 3 blow with **A4**.
+**Paddy Richter** — hole 3 blow only: G4 → **A4**
+
+**Country** — holes 5 and 9 draw: F5 → **F#5**, F6 → **F#6**
+
+**Natural Minor (Dm)**
+```
+Hole:    1    2    3    4    5    6    7    8    9   10
+Blow:   D4   F4   A4   D5   F5   A5   D6   F6   A6   D7
+Draw:   E4   G4   B♭4  C5   E5   G5   C6   E6   G6   C7
+```
 
 ---
 
 ## Stack
 
-- [React 18](https://react.dev/) — UI and state
-- [Vite 4](https://vitejs.dev/) — dev server and bundler
-- Web Audio API — all sound synthesis, built into the browser
+- [Expo 52](https://expo.dev/) — native build toolchain and device APIs
+- [React Native 0.76](https://reactnative.dev/) — UI and touch event system
+- [react-native-audio-api](https://github.com/software-mansion/react-native-audio-api) — Web Audio API spec running natively
+- [expo-screen-orientation](https://docs.expo.dev/versions/latest/sdk/screen-orientation/) — landscape lock
+- [react-native-safe-area-context](https://github.com/th3rdwave/react-native-safe-area-context) — notch/cutout avoidance
