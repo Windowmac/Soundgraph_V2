@@ -1,14 +1,15 @@
 /**
- * SoundGraph V2 — React Native harmonica instrument
+ * SoundGraph V2 — React Native multi-instrument app
  *
- * Architecture
- * ────────────
- *  • HarmonicaGrid   Full-screen landscape key grid; handles multi-touch
- *                    note playing, horizontal glide, and vertical pitch bend.
- *  • TuningMenu      Animated panel that slides down from the top when the
- *                    user swipes down from the thin handle bar at the very top.
- *  • useAudioEngine  Polyphonic square-wave synthesiser via react-native-audio-api
- *                    (Web Audio API spec running natively).
+ * Instruments
+ * ───────────
+ *  • Harmonica  — 2×10 grid, horizontal glide, vertical pitch bend
+ *  • Guitar     — 9 chord nodes + strum area; radial chord editor
+ *
+ * Shared infrastructure
+ * ─────────────────────
+ *  • Slide-down menu  Mode selector + per-mode settings (tunings / edit mode)
+ *  • react-native-audio-api  Web Audio API spec running on native threads
  */
 
 import React, { useRef, useState, useCallback } from 'react';
@@ -26,7 +27,13 @@ import { SafeAreaView, SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import { HarmonicaGrid } from './src/components/HarmonicaGrid';
+import { GuitarLayout }  from './src/components/GuitarLayout';
 import { TUNINGS, Tuning } from './src/data/tunings';
+import {
+  ChordSlot,
+  ChordDefinition,
+  DEFAULT_CHORD_SLOTS,
+} from './src/data/chords';
 
 // ─── Lock orientation on mount ───────────────────────────────────────────────
 ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
@@ -47,22 +54,26 @@ const MONO = Platform.select({
   default: 'Courier New',
 });
 
+type AppMode = 'harmonica' | 'guitar';
+
 // ─── Menu geometry ───────────────────────────────────────────────────────────
-const HANDLE_HEIGHT   = 22;  // always-visible swipe-zone at the very top
-const MENU_HEIGHT     = 210; // full panel height (visible when open)
-const SWIPE_THRESHOLD = MENU_HEIGHT * 0.35; // how far to drag before snap-open
-const TRIGGER_ZONE    = 50;  // px from top of screen that activates the gesture
+const HANDLE_HEIGHT   = 22;
+const MENU_HEIGHT     = 280;  // expanded to fit mode row + edit toggle + tunings
+const SWIPE_THRESHOLD = MENU_HEIGHT * 0.35;
+const TRIGGER_ZONE    = 50;
 
 // ─── Root component ──────────────────────────────────────────────────────────
 export default function App() {
-  const [activeTuningId, setActiveTuningId] = useState<string>(TUNINGS[0].id);
-  const [menuOpen, setMenuOpen]             = useState(false);
+  const [appMode,         setAppMode]        = useState<AppMode>('harmonica');
+  const [activeTuningId,  setActiveTuningId] = useState<string>(TUNINGS[0].id);
+  const [guitarEditMode,  setGuitarEditMode] = useState(false);
+  const [chordSlots,      setChordSlots]     = useState<ChordSlot[]>(DEFAULT_CHORD_SLOTS);
+  const [menuOpen,        setMenuOpen]       = useState(false);
 
   const currentTuning: Tuning =
     TUNINGS.find(t => t.id === activeTuningId) ?? TUNINGS[0];
 
   // ── Menu animation ─────────────────────────────────────────────────────────
-  // translateY: -MENU_HEIGHT = fully hidden above screen | 0 = fully visible
   const menuY = useRef(new Animated.Value(-MENU_HEIGHT)).current;
 
   const snapOpen = useCallback(() => {
@@ -89,10 +100,24 @@ export default function App() {
     snapClosed();
   }, [snapClosed]);
 
-  // ── Swipe-down pan responder (lives on the handle strip) ───────────────────
+  const selectMode = useCallback((mode: AppMode) => {
+    setAppMode(mode);
+    if (mode === 'harmonica') setGuitarEditMode(false);
+    snapClosed();
+  }, [snapClosed]);
+
+  const handleUpdateSlot = useCallback((index: number, chord: ChordDefinition) => {
+    setChordSlots(prev => prev.map(s => s.index === index ? { ...s, chord } : s));
+  }, []);
+
+  // ── Handle label ────────────────────────────────────────────────────────────
+  const handleLabel = appMode === 'guitar'
+    ? (guitarEditMode ? 'GUITAR · EDIT' : 'GUITAR')
+    : currentTuning.name;
+
+  // ── Swipe-down pan responder ─────────────────────────────────────────────
   const handlePan = useRef(
     PanResponder.create({
-      // Only capture a gesture that starts inside the handle zone
       onStartShouldSetPanResponder: (evt) =>
         evt.nativeEvent.pageY < TRIGGER_ZONE,
 
@@ -100,7 +125,6 @@ export default function App() {
         !menuOpen && gs.dy > 6 && evt.nativeEvent.pageY < TRIGGER_ZONE + 30,
 
       onPanResponderMove: (_, gs) => {
-        // Clamp so the panel never slides below its natural resting position
         const newY = Math.min(0, -MENU_HEIGHT + gs.dy);
         menuY.setValue(newY);
       },
@@ -109,7 +133,6 @@ export default function App() {
         if (gs.dy > SWIPE_THRESHOLD) {
           snapOpen();
         } else {
-          // Not dragged far enough — snap back
           Animated.spring(menuY, {
             toValue:         -MENU_HEIGHT,
             useNativeDriver: true,
@@ -127,9 +150,18 @@ export default function App() {
       <SafeAreaView style={styles.safeArea} edges={['left', 'right', 'bottom']}>
         <StatusBar hidden />
 
-        {/* ── Grid (fills everything below the handle) ── */}
+        {/* ── Instrument grid ── */}
         <View style={styles.gridWrapper}>
-          <HarmonicaGrid tuning={currentTuning} disabled={menuOpen} />
+          {appMode === 'harmonica' ? (
+            <HarmonicaGrid tuning={currentTuning} disabled={menuOpen} />
+          ) : (
+            <GuitarLayout
+              chordSlots={chordSlots}
+              onUpdateSlot={handleUpdateSlot}
+              editMode={guitarEditMode}
+              disabled={menuOpen}
+            />
+          )}
         </View>
 
         {/* ── Swipe handle strip ── */}
@@ -139,10 +171,10 @@ export default function App() {
           pointerEvents="box-only"
         >
           <View style={styles.handlePill} />
-          <Text style={styles.handleLabel}>{currentTuning.name}</Text>
+          <Text style={styles.handleLabel}>{handleLabel}</Text>
         </View>
 
-        {/* ── Tap-outside backdrop (closes menu) ── */}
+        {/* ── Backdrop ── */}
         {menuOpen && (
           <TouchableOpacity
             style={[StyleSheet.absoluteFill, styles.backdrop]}
@@ -151,42 +183,81 @@ export default function App() {
           />
         )}
 
-        {/* ── Animated tuning menu panel ── */}
+        {/* ── Slide-down menu panel ── */}
         <Animated.View
-          style={[
-            styles.menuPanel,
-            { transform: [{ translateY: menuY }] },
-          ]}
+          style={[styles.menuPanel, { transform: [{ translateY: menuY }] }]}
           pointerEvents={menuOpen ? 'box-none' : 'none'}
         >
           <View style={styles.menuInner}>
-            {/* Close handle inside menu */}
             <View style={styles.menuCloseArea}>
               <View style={styles.menuClosePill} />
             </View>
 
-            <Text style={styles.menuTitle}>SELECT TUNING</Text>
+            {/* Mode selector row */}
+            <Text style={styles.menuTitle}>MODE</Text>
+            <View style={styles.modeRow}>
+              {(['harmonica', 'guitar'] as AppMode[]).map(mode => (
+                <Pressable
+                  key={mode}
+                  style={({ pressed }) => [
+                    styles.modeButton,
+                    appMode === mode && styles.modeButtonActive,
+                    pressed && styles.modeButtonPressed,
+                  ]}
+                  onPress={() => selectMode(mode)}
+                >
+                  <Text style={[
+                    styles.modeButtonLabel,
+                    appMode === mode && styles.modeButtonLabelActive,
+                  ]}>
+                    {mode.toUpperCase()}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
 
-            <View style={styles.tuningList}>
+            {/* Guitar edit toggle */}
+            {appMode === 'guitar' && (
+              <Pressable
+                style={({ pressed }) => [
+                  styles.editToggle,
+                  guitarEditMode && styles.editToggleActive,
+                  pressed && styles.editTogglePressed,
+                ]}
+                onPress={() => setGuitarEditMode(v => !v)}
+              >
+                <Text style={[
+                  styles.editToggleLabel,
+                  guitarEditMode && styles.editToggleLabelActive,
+                ]}>
+                  {guitarEditMode ? '● EDIT CHORDS ON' : '○ EDIT CHORDS'}
+                </Text>
+              </Pressable>
+            )}
+
+            {/* Tuning list (harmonica only) */}
+            <Text style={[styles.menuTitle, styles.menuTitleSpaced, appMode === 'guitar' && styles.dimmed]}>
+              TUNING
+            </Text>
+            <View style={[styles.tuningList, appMode === 'guitar' && styles.dimmed]}>
               {TUNINGS.map(t => (
                 <Pressable
                   key={t.id}
                   style={({ pressed }) => [
                     styles.tuningItem,
                     t.id === activeTuningId && styles.tuningItemActive,
-                    pressed && styles.tuningItemPressed,
+                    pressed && appMode === 'harmonica' && styles.tuningItemPressed,
                   ]}
-                  onPress={() => selectTuning(t.id)}
+                  onPress={() => appMode === 'harmonica' && selectTuning(t.id)}
+                  disabled={appMode === 'guitar'}
                 >
-                  <Text
-                    style={[
-                      styles.tuningName,
-                      t.id === activeTuningId && styles.tuningNameActive,
-                    ]}
-                  >
+                  <Text style={[
+                    styles.tuningName,
+                    t.id === activeTuningId && appMode === 'harmonica' && styles.tuningNameActive,
+                  ]}>
                     {t.name}
                   </Text>
-                  {t.id === activeTuningId && (
+                  {t.id === activeTuningId && appMode === 'harmonica' && (
                     <View style={styles.activeIndicator} />
                   )}
                 </Pressable>
@@ -206,27 +277,25 @@ const styles = StyleSheet.create({
     backgroundColor: C.BLACK,
   },
 
-  // ── Grid ──────────────────────────────────────────────────────────────────
   gridWrapper: {
-    flex:       1,
-    marginTop:  HANDLE_HEIGHT, // leave room for the handle strip
+    flex:      1,
+    marginTop: HANDLE_HEIGHT,
   },
 
-  // ── Handle strip ──────────────────────────────────────────────────────────
   handleStrip: {
-    position:        'absolute',
-    top:             0,
-    left:            0,
-    right:           0,
-    height:          HANDLE_HEIGHT,
-    flexDirection:   'row',
-    alignItems:      'center',
-    justifyContent:  'center',
-    gap:             10,
-    backgroundColor: C.BLACK,
+    position:          'absolute',
+    top:               0,
+    left:              0,
+    right:             0,
+    height:            HANDLE_HEIGHT,
+    flexDirection:     'row',
+    alignItems:        'center',
+    justifyContent:    'center',
+    gap:               10,
+    backgroundColor:   C.BLACK,
     borderBottomWidth: 1,
     borderBottomColor: C.DIMMER,
-    zIndex:          10,
+    zIndex:            10,
   },
   handlePill: {
     width:           32,
@@ -241,32 +310,30 @@ const styles = StyleSheet.create({
     letterSpacing: 2,
   },
 
-  // ── Backdrop ──────────────────────────────────────────────────────────────
   backdrop: {
     backgroundColor: 'rgba(0,0,0,0.55)',
     zIndex:          20,
   },
 
-  // ── Menu panel ────────────────────────────────────────────────────────────
   menuPanel: {
-    position:  'absolute',
-    top:       0,
-    left:      0,
-    right:     0,
-    height:    MENU_HEIGHT,
-    zIndex:    30,
+    position: 'absolute',
+    top:      0,
+    left:     0,
+    right:    0,
+    height:   MENU_HEIGHT,
+    zIndex:   30,
   },
   menuInner: {
-    flex:            1,
-    backgroundColor: C.MENU_BG,
+    flex:              1,
+    backgroundColor:   C.MENU_BG,
     borderBottomWidth: 1,
     borderBottomColor: C.DIM_GREEN,
     paddingHorizontal: 24,
     paddingBottom:     16,
   },
   menuCloseArea: {
-    alignItems: 'center',
-    paddingTop: 8,
+    alignItems:    'center',
+    paddingTop:    8,
     paddingBottom: 4,
   },
   menuClosePill: {
@@ -280,8 +347,72 @@ const styles = StyleSheet.create({
     fontSize:      10,
     color:         C.DIM_GREEN,
     letterSpacing: 3,
-    marginBottom:  14,
+    marginBottom:  8,
     marginTop:     6,
+  },
+  menuTitleSpaced: {
+    marginTop: 12,
+  },
+
+  // ── Mode row ──────────────────────────────────────────────────────────────
+  modeRow: {
+    flexDirection: 'row',
+    gap:           8,
+    marginBottom:  4,
+  },
+  modeButton: {
+    flex:              1,
+    paddingVertical:   8,
+    paddingHorizontal: 12,
+    borderWidth:       1,
+    borderColor:       C.DIMMER,
+    borderRadius:      2,
+    alignItems:        'center',
+  },
+  modeButtonActive: {
+    borderColor:     C.DIM_GREEN,
+    backgroundColor: 'rgba(0,92,19,0.20)',
+  },
+  modeButtonPressed: {
+    backgroundColor: 'rgba(0,255,65,0.08)',
+  },
+  modeButtonLabel: {
+    fontFamily:    MONO,
+    fontSize:      11,
+    color:         C.DIM_GREEN,
+    letterSpacing: 2,
+  },
+  modeButtonLabelActive: {
+    color:            C.GREEN,
+    textShadowColor:  C.GREEN,
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 4,
+  },
+
+  // ── Edit chords toggle ────────────────────────────────────────────────────
+  editToggle: {
+    paddingVertical:   8,
+    paddingHorizontal: 12,
+    borderWidth:       1,
+    borderColor:       C.DIMMER,
+    borderRadius:      2,
+    marginBottom:      4,
+  },
+  editToggleActive: {
+    borderColor:     C.GREEN,
+    backgroundColor: 'rgba(0,255,65,0.08)',
+  },
+  editTogglePressed: {
+    backgroundColor: 'rgba(0,255,65,0.05)',
+  },
+  editToggleLabel: {
+    fontFamily:    MONO,
+    fontSize:      11,
+    color:         C.DIM_GREEN,
+    letterSpacing: 2,
+  },
+  editToggleLabelActive: {
+    color: C.GREEN,
   },
 
   // ── Tuning list ───────────────────────────────────────────────────────────
@@ -290,13 +421,13 @@ const styles = StyleSheet.create({
     gap:           2,
   },
   tuningItem: {
-    flexDirection:   'row',
-    alignItems:      'center',
-    paddingVertical: 10,
+    flexDirection:     'row',
+    alignItems:        'center',
+    paddingVertical:   8,
     paddingHorizontal: 12,
-    borderWidth:     1,
-    borderColor:     C.DIMMER,
-    borderRadius:    2,
+    borderWidth:       1,
+    borderColor:       C.DIMMER,
+    borderRadius:      2,
   },
   tuningItemActive: {
     borderColor:     C.DIM_GREEN,
@@ -307,14 +438,14 @@ const styles = StyleSheet.create({
   },
   tuningName: {
     fontFamily:    MONO,
-    fontSize:      13,
+    fontSize:      12,
     color:         C.DIM_GREEN,
     letterSpacing: 1.5,
     flex:          1,
   },
   tuningNameActive: {
-    color:         C.GREEN,
-    textShadowColor: C.GREEN,
+    color:            C.GREEN,
+    textShadowColor:  C.GREEN,
     textShadowOffset: { width: 0, height: 0 },
     textShadowRadius: 4,
   },
@@ -328,5 +459,8 @@ const styles = StyleSheet.create({
     shadowOpacity:   1,
     shadowRadius:    4,
     elevation:       4,
+  },
+  dimmed: {
+    opacity: 0.35,
   },
 });
