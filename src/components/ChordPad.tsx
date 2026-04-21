@@ -3,12 +3,10 @@ import { View, Text, StyleSheet, Platform } from 'react-native';
 import { ChordSlot } from '../data/chords';
 
 interface Props {
-  slot:        ChordSlot;
-  isActive:    boolean;
-  isEditMode:  boolean;
-  onLongPress: (index: number, x: number, y: number) => void;
-  // Touch callbacks are handled by the parent PanResponder;
-  // these are for visual-only feedback triggered externally.
+  slot:       ChordSlot;
+  isActive:   boolean;
+  isEditMode: boolean;
+  size:       number;   // diameter in dp — caller controls sizing
 }
 
 const C = {
@@ -24,20 +22,23 @@ const MONO = Platform.select({
   default: 'Courier New',
 });
 
-export function ChordPad({ slot, isActive, isEditMode }: Props) {
-  const label = slot.chord?.label ?? '—';
+export function ChordPad({ slot, isActive, isEditMode, size }: Props) {
+  const label    = slot.chord?.label ?? '—';
+  const radius   = size / 2;
+  const fontSize = Math.round(size * 0.14);
 
   return (
     <View style={[
       styles.pad,
-      isActive    && styles.padActive,
-      isEditMode  && styles.padEdit,
+      { width: size, height: size, borderRadius: radius },
+      isActive   && styles.padActive,
+      isEditMode && styles.padEdit,
     ]}>
-      <Text style={[styles.label, isActive && styles.labelActive]}>
+      <Text style={[styles.label, { fontSize }, isActive && styles.labelActive]}>
         {label}
       </Text>
       {isEditMode && (
-        <Text style={styles.editHint}>hold</Text>
+        <Text style={[styles.editHint, { fontSize: Math.max(7, fontSize * 0.55) }]}>hold</Text>
       )}
     </View>
   );
@@ -45,47 +46,39 @@ export function ChordPad({ slot, isActive, isEditMode }: Props) {
 
 const styles = StyleSheet.create({
   pad: {
-    flex: 1,
-    margin: 3,
-    borderWidth: 1,
-    borderColor: C.BORDER,
-    borderRadius: 4,
-    backgroundColor: '#020e04',
-    justifyContent: 'center',
-    alignItems: 'center',
-    // Android elevation for inactive
-    elevation: 1,
+    borderWidth:     1.5,
+    borderColor:     C.BORDER,
+    backgroundColor: 'rgba(2,14,4,0.88)',
+    justifyContent:  'center',
+    alignItems:      'center',
+    elevation:       3,
   },
   padActive: {
     backgroundColor: C.GREEN,
-    borderColor: C.GREEN,
-    elevation: 6,
-    // iOS shadow
-    shadowColor: C.GREEN,
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.9,
-    shadowRadius: 8,
+    borderColor:     C.GREEN,
+    elevation:       8,
+    shadowColor:     C.GREEN,
+    shadowOffset:    { width: 0, height: 0 },
+    shadowOpacity:   0.9,
+    shadowRadius:    10,
   },
   padEdit: {
     borderColor: C.DIM_GREEN,
     borderStyle: 'dashed',
   },
   label: {
-    color: C.GREEN,
+    color:      C.GREEN,
     fontFamily: MONO,
-    fontSize: 15,
     fontWeight: '700',
-    letterSpacing: 1,
   },
   labelActive: {
     color: C.DIMMER,
   },
   editHint: {
-    color: C.DIM_GREEN,
-    fontFamily: MONO,
-    fontSize: 8,
-    letterSpacing: 2,
-    marginTop: 2,
-    opacity: 0.6,
+    color:         C.DIM_GREEN,
+    fontFamily:    MONO,
+    letterSpacing: 1,
+    marginTop:     2,
+    opacity:       0.7,
   },
 });

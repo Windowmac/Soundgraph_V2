@@ -73,6 +73,9 @@ export function buildChord(root: RootNote, variant: ChordVariant): ChordDefiniti
   return { root, variant, label, frequencies };
 }
 
+// ─── Open guitar string frequencies: E2 A2 D3 G3 B3 E4 (standard tuning) ─────
+export const OPEN_STRING_FREQS: number[] = [82.41, 110.00, 146.83, 196.00, 246.94, 329.63];
+
 // ─── Default 9 chord slots ────────────────────────────────────────────────────
 export const DEFAULT_CHORD_SLOTS: ChordSlot[] = [
   { index: 0, chord: buildChord('C',  'major') },
