@@ -10,7 +10,7 @@ export interface ChordDefinition {
   root:        RootNote;
   variant:     ChordVariant;
   label:       string;
-  frequencies: number[];  // 5 Hz values, low → high
+  frequencies: number[];  // 6 Hz values, low → high (one per guitar string)
 }
 
 export interface ChordSlot {
@@ -34,16 +34,18 @@ const ROOT_FREQ: Record<RootNote, number> = {
   'G#': 207.65,
 };
 
-// ─── Chord interval patterns (semitones from root, 5 notes) ──────────────────
+// ─── Chord interval patterns (semitones from root, 6 notes: R 3 5 R' 3' 5') ──
+// One semitone value per guitar string (low → high). Each chord covers 2 octaves,
+// giving each string a unique pitch and avoiding duplicate middle strings.
 const CHORD_INTERVALS: Record<ChordVariant, number[]> = {
-  major: [0, 4,  7, 12, 16],
-  minor: [0, 3,  7, 12, 15],
-  sus2:  [0, 2,  7, 12, 14],
-  sus4:  [0, 5,  7, 12, 17],
-  maj7:  [0, 4,  7, 11, 16],
-  min7:  [0, 3,  7, 10, 15],
-  '7':   [0, 4,  7, 10, 16],
-  add9:  [0, 4,  7, 14, 16],
+  major: [0,  4,  7, 12, 16, 19],  // R  3  5  R'  3'  5'
+  minor: [0,  3,  7, 12, 15, 19],  // R  b3 5  R'  b3' 5'
+  sus2:  [0,  2,  7, 12, 14, 19],  // R  2  5  R'  2'  5'
+  sus4:  [0,  5,  7, 12, 17, 19],  // R  4  5  R'  4'  5'
+  maj7:  [0,  4,  7, 11, 16, 19],  // R  3  5  7   3'  5'
+  min7:  [0,  3,  7, 10, 15, 19],  // R  b3 5  b7  b3' 5'
+  '7':   [0,  4,  7, 10, 16, 19],  // R  3  5  b7  3'  5'
+  add9:  [0,  4,  7, 14, 16, 19],  // R  3  5  9   3'  5'
 };
 
 // ─── Human-readable variant labels ───────────────────────────────────────────

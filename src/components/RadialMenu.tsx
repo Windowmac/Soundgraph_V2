@@ -11,13 +11,16 @@ import { RootNote, ChordVariant, ALL_ROOTS, ALL_VARIANTS, VARIANT_LABELS } from 
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const ITEM_SIZE  = 72;   // diameter of each menu item
-const RADIUS_L1  = 150;  // root-note ring radius
-const RADIUS_L2  = 150;  // variant ring radius
-const HIT_RADIUS = 64;   // px proximity to activate an item
+const ITEM_SIZE  = 52;   // diameter of each menu item
+const RADIUS_L1  = 100;  // root-note ring radius
+const RADIUS_L2  = 100;  // variant ring radius
+const HIT_RADIUS = 50;   // px proximity to activate an item
 const DWELL_MS   = 800;  // ms of hovering to confirm a selection
-// How far beyond the confirmed L1 item to place the L2 ring center
-const L2_OFFSET  = 110;
+// Distance from confirmed L1 item outward to place the L2 ring center
+const L2_OFFSET  = 80;
+// Minimum distance from any screen edge to keep all ring items on-screen:
+// radius + item half-width + small padding
+const SAFE_MARGIN = RADIUS_L1 + ITEM_SIZE / 2 + 10;
 
 const C = {
   GREEN:     '#00ff41',
@@ -61,9 +64,9 @@ interface Props {
 export function RadialMenu({ origin, dragPos, onVariantConfirmed, onDismiss }: Props) {
   const { width: SW, height: SH } = Dimensions.get('window');
 
-  // Clamp L1 center to screen
-  const cx = clampToScreen(origin.x, ITEM_SIZE, SW);
-  const cy = clampToScreen(origin.y, ITEM_SIZE, SH);
+  // Clamp L1 center so all ring items stay on-screen
+  const cx = clampToScreen(origin.x, SAFE_MARGIN, SW);
+  const cy = clampToScreen(origin.y, SAFE_MARGIN, SH);
 
   // Internal dwell state
   const [confirmedRoot,    setConfirmedRoot]    = useState<RootNote | null>(null);
@@ -97,11 +100,11 @@ export function RadialMenu({ origin, dragPos, onVariantConfirmed, onDismiss }: P
   // Pre-compute L2 positions (depend on l2Origin)
   const variantItems = useMemo(() => {
     if (!l2Origin) return [];
-    const l2x = clampToScreen(l2Origin.x, ITEM_SIZE, SW);
-    const l2y = clampToScreen(l2Origin.y, ITEM_SIZE, SH);
+    const l2cx = clampToScreen(l2Origin.x, SAFE_MARGIN, SW);
+    const l2cy = clampToScreen(l2Origin.y, SAFE_MARGIN, SH);
     return ALL_VARIANTS.map((variant, i) => ({
       variant,
-      ...itemPos(i, ALL_VARIANTS.length, l2x, l2y, RADIUS_L2),
+      ...itemPos(i, ALL_VARIANTS.length, l2cx, l2cy, RADIUS_L2),
     }));
   }, [l2Origin, SW, SH]);
 
@@ -110,9 +113,7 @@ export function RadialMenu({ origin, dragPos, onVariantConfirmed, onDismiss }: P
     const hasL2 = confirmedRootRef.current !== null;
 
     if (hasL2 && l2OriginRef.current) {
-      // L2 phase: find nearest variant
-      const l2x = clampToScreen(l2OriginRef.current.x, ITEM_SIZE, SW);
-      const l2y = clampToScreen(l2OriginRef.current.y, ITEM_SIZE, SH);
+      // L2 phase: find nearest variant (variantItems already use clamped L2 center)
       let minD = Infinity;
       let nearIdx = -1;
       variantItems.forEach(({ x, y }, i) => {
@@ -195,13 +196,13 @@ export function RadialMenu({ origin, dragPos, onVariantConfirmed, onDismiss }: P
   }, [confirmedRoot, l2Origin, rootItems]);
 
   // ── Clamped L2 center for rendering ─────────────────────────────────────────
-  const l2cx = l2Origin ? clampToScreen(l2Origin.x, ITEM_SIZE, SW) : 0;
-  const l2cy = l2Origin ? clampToScreen(l2Origin.y, ITEM_SIZE, SH) : 0;
+  const l2cx = l2Origin ? clampToScreen(l2Origin.x, SAFE_MARGIN, SW) : 0;
+  const l2cy = l2Origin ? clampToScreen(l2Origin.y, SAFE_MARGIN, SH) : 0;
 
   return (
-    <View style={StyleSheet.absoluteFill} pointerEvents="none">
-      {/* Scrim */}
-      <View style={[StyleSheet.absoluteFill, styles.scrim]} />
+    <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
+      {/* Scrim — tapping outside all items dismisses the menu */}
+      <View style={[StyleSheet.absoluteFill, styles.scrim]} onTouchEnd={onDismiss} />
 
       {/* Connecting line between confirmed L1 item and L2 origin */}
       {lineGeom && (
